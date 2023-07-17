@@ -1116,12 +1116,18 @@ class ConfigHandler(object):
 
         for name, cname in options_mapping.items():
             value = parse_int(effective_configuration[name])
+            logger.info("DEBUG: Effective_configuration, checking name %s cname %s", name, cname)
             if cname not in data:
                 logger.warning('%s is missing from pg_controldata output', cname)
                 continue
 
             cvalue = parse_int(data[cname])
+            if value is not None:
+                logger.info("Effective_configuration, value %d (name: %s, cname: %s)", value, name, cname)
+            if cvalue is not None:
+                logger.info("Effective_configuration, cvalue %d (name: %s, cname: %s)", cvalue, name, cname)
             if cvalue is not None and value is not None and cvalue > value:
+                logger.info("DEBUG: Effective_configuration, Setting effective config of name %s to cvalue %d, value %d", name, cvalue, value)
                 effective_configuration[name] = cvalue
                 self._postgresql.set_pending_restart(True)
 
