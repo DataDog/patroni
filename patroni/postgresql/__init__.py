@@ -819,22 +819,6 @@ class Postgresql(object):
             postmaster.wait_for_user_backends_to_close(stop_timeout)
             on_safepoint()
 
-        if on_shutdown and mode in ('fast', 'smart'):
-            i = 0
-            # Wait for pg_controldata `Database cluster state:` to change to "shut down"
-            while postmaster.is_running():
-                data = self.controldata()
-                if data.get('Database cluster state', '') == 'shut down':
-                    on_shutdown(self.latest_checkpoint_location())
-                    break
-                elif data.get('Database cluster state', '').startswith('shut down'):  # shut down in recovery
-                    break
-                elif stop_timeout and i >= stop_timeout:
-                    stop_timeout = 0
-                    break
-                time.sleep(STOP_POLLING_INTERVAL)
-                i += STOP_POLLING_INTERVAL
-
         try:
             postmaster.wait(timeout=stop_timeout)
         except TimeoutExpired:
