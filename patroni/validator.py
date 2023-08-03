@@ -922,6 +922,7 @@ schema = Schema({
                 Optional("pg_ident"): [str],
                 Optional("pg_ctl_timeout"): int,
                 Optional("use_slots"): bool,
+                Optional("wait_for_postmaster_shutdown"): bool,
             },
             Optional("primary_start_timeout"): int,
             Optional("primary_stop_timeout"): int,
