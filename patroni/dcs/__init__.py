@@ -1018,6 +1018,11 @@ class Cluster(NamedTuple('Cluster',
         """``True`` if cluster is configured to use replication slots."""
         return bool(self.config and (self.config.data.get('postgresql') or {}).get('use_slots', True))
 
+    @property
+    def wait_for_postmaster_shutdown(self) -> bool:
+        return bool(self.config
+                    and (self.config.data.get('postgresql') or {}).get('wait_for_postmaster_shutdown', False))
+
     def get_replication_slots(self, my_name: str, role: str, nofailover: bool, major_version: int, *,
                               is_standby_cluster: bool = False, show_error: bool = False) -> Dict[str, Dict[str, Any]]:
         """Lookup configured slot names in the DCS, report issues found and merge with permanent slots.
