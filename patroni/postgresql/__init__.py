@@ -865,7 +865,7 @@ class Postgresql(object):
             postmaster.wait_for_user_backends_to_close(stop_timeout)
             on_safepoint()
 
-        if on_shutdown and mode in ('fast', 'smart'):
+        if on_shutdown and mode in ('fast', 'smart') and not self.config.get('wait_for_postmaster_shutdown', False):
             i = 0
             # Wait for pg_controldata `Database cluster state:` to change to "shut down"
             while postmaster.is_running():

@@ -244,6 +244,7 @@ class Config(object):
         },
         'postgresql': {
             'use_slots': True,
+            'wait_for_postmaster_shutdown': False,
             'parameters': CaseInsensitiveDict({p: v[0] for p, v in ConfigHandler.CMDLINE_OPTIONS.items()
                                                if v[0] is not None and p not in ('wal_keep_segments', 'wal_keep_size')})
         }
