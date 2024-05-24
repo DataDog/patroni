@@ -67,6 +67,7 @@ class Postgresql(object):
         self.name: str = config['name']
         self.scope: str = config['scope']
         self._data_dir: str = config['data_dir']
+        self._custom_wal_dir: str = config['custom_wal_dir']
         self._database = config.get('database', 'postgres')
         self._version_file = os.path.join(self._data_dir, 'PG_VERSION')
         self._pg_control = os.path.join(self._data_dir, 'global', 'pg_control')
@@ -159,6 +160,13 @@ class Postgresql(object):
     @property
     def data_dir(self) -> str:
         return self._data_dir
+
+    @property
+    def custom_wal_dir(self) -> str:
+        path = self._custom_wal_dir
+        if path and path != self.wal_dir and os.path.exists(path):
+            return path
+        return ''
 
     @property
     def callback(self) -> Dict[str, str]:

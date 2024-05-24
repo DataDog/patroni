@@ -558,6 +558,13 @@ class ConfigHandler(object):
                 f.writelines(self._config['pg_ident'])
             return True
 
+    def setup_pg_wal(self) -> bool:
+        if self._postgresql.custom_wal_dir:
+            if not os.path.exists(self._postgresql.wal_dir):
+                os.symlink(self._postgresql.wal_dir, self._postgresql.custom_wal_dir, target_is_directory=True)
+            self.set_file_permissions(self._postgresql.wal_dir)
+        return True
+
     def primary_conninfo_params(self, member: Union[Leader, Member, None]) -> Optional[Dict[str, Any]]:
         if not member or not member.conn_url or member.name == self._postgresql.name:
             return None

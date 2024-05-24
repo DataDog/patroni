@@ -383,7 +383,8 @@ class Bootstrap(object):
             method = 'initdb'
             do_initialize = self._initdb
         return do_initialize(config.get(method)) and self._postgresql.config.append_pg_hba(pg_hba) \
-            and self._postgresql.config.save_configuration_files() and bool(self._postgresql.start())
+            and self._postgresql.config.save_configuration_files() \
+            and self._postgresql.config.setup_pg_wal() and bool(self._postgresql.start())
 
     def create_or_update_role(self, name: str, password: Optional[str], options: List[str]) -> None:
         options = list(map(str.upper, options))
