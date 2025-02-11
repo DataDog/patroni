@@ -69,7 +69,7 @@ RUN set -ex \
 \
     # Clean up all useless packages and some files
     && apt-get purge -y --allow-remove-essential gzip bzip2 util-linux e2fsprogs \
-                libmagic1 bsdmainutils login ncurses-bin libmagic-mgc e2fslibs bsdutils \
+                libmagic1 bsdmainutils login ncurses-bin libmagic-mgc python3-pip e2fslibs bsdutils \
                 exim4-config gnupg-agent dirmngr \
                 git make \
     && apt-get autoremove -y \
@@ -167,8 +167,10 @@ RUN sed -i 's/env python/&3/' /patroni*.py \
     && chmod +s /bin/ping \
     && chown -R postgres:postgres "$PGHOME" /run /etc/haproxy
 
-COPY .github/workflows/install_deps.py .
-RUN python3 install_deps.py
+COPY requirements.txt .
+RUN curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+RUN python3 get-pip.py --force-reinstall --break-system-packages
+RUN pip install -r requirements.txt --break-system-packages
 
 USER postgres
 
