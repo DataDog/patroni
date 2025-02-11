@@ -10,6 +10,7 @@ import time
 import urllib3
 
 from collections import defaultdict
+from lockness import SyncClient, Heartbeats, LockStatus, LockNessTimeoutError
 from enum import IntEnum
 from urllib3.exceptions import ReadTimeoutError, ProtocolError
 from threading import Condition, Lock, Thread
@@ -58,6 +59,27 @@ GRPCcodeToText: Dict[int, str] = {v: k for k, v in GRPCCode.__dict__['_member_ma
 
 class Etcd3Exception(etcd.EtcdException):
     pass
+
+
+class LockNess:
+    def __init__(self, config: Dict[str, Any]) -> None:
+        connect_string = config.get('connect_string', 'localhost:9111')
+        self.client = SyncClient.connect(connect_string, heartbeats=Heartbeats.auto(20))
+
+    def acquire_lock(self, target: str, owner: str) -> bool:
+        lock_id = self.client.request_lock(targets=[target], owner=owner, domain="postgres")
+        states = self.client.stream_lock_states(lock_id)
+
+        lock_state = None
+        while lock_state is None or lock_state.status != LockStatus.Acquired:
+            try:
+                lock_state = states.recv(timeout_ms=1000)
+            except LockNessTimeoutError:
+                print("Waiting for lock...")
+
+            print(f"Lock state: {lock_state=}")
+            if lock_state.status == LockStatus.Released:
+                raise RuntimeError("Lock was released before acquired")
 
 
 class Etcd3ClientError(Etcd3Exception):

@@ -130,11 +130,14 @@ def iter_dcs_classes(
 
             try:
                 module = importlib.import_module(mod_name)
+                print("imported module ", module)
                 dcs_module = find_dcs_class_in_module(module)
+                print("class in module ", dcs_module)
                 if dcs_module:
                     yield name, dcs_module
 
-            except ImportError:
+            except ImportError as e:
+                logger.error('Failed to import %s: %s', mod_name, e)
                 logger.log(logging.DEBUG if config is not None else logging.INFO,
                            'Failed to import %s', mod_name)
 
@@ -183,6 +186,7 @@ def get_dcs(config: Union['Config', Dict[str, Any]]) -> 'AbstractDCS':
         # From citus section we only need "group" parameter, but will propagate everything just in case.
         if isinstance(config.get('citus'), dict):
             config[name].update(config['citus'])
+        print("DCS class loaded ", config[name])
         return dcs_class(config[name])
 
     raise PatroniFatalException(
@@ -1029,7 +1033,7 @@ class Cluster(NamedTuple('Cluster',
     def use_slots(self) -> bool:
         """``True`` if cluster is configured to use replication slots."""
         return bool(self.config and (self.config.data.get('postgresql') or {}).get('use_slots', True))
-    
+
     @property
     def wait_for_postmaster_shutdown(self) -> bool:
         return bool(self.config

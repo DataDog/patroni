@@ -11,3 +11,5 @@ pysyncobj>=0.3.8
 cryptography>=1.4
 psutil>=2.0.0
 ydiff>=1.2.0
+cobs_client @ https://binaries.ddbuild.io/dd-source/python/cobs_client-0.0.42842433-py3-none-any.whl
+lockness @ https://binaries.ddbuild.io/dd-source/python/lockness-0.0.55294957-py3-none-any.whl

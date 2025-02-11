@@ -7,7 +7,7 @@ ARG PGDATA=$PGHOME/data
 ARG LC_ALL=C.UTF-8
 ARG LANG=C.UTF-8
 
-FROM postgres:$PG_MAJOR as builder
+FROM registry.ddbuild.io/images/mirror/postgres:$PG_MAJOR as builder
 
 ARG PGHOME
 ARG PGDATA
@@ -68,7 +68,7 @@ RUN set -ex \
     fi \
 \
     # Clean up all useless packages and some files
-    && apt-get purge -y --allow-remove-essential python3-pip gzip bzip2 util-linux e2fsprogs \
+    && apt-get purge -y --allow-remove-essential gzip bzip2 util-linux e2fsprogs \
                 libmagic1 bsdmainutils login ncurses-bin libmagic-mgc e2fslibs bsdutils \
                 exim4-config gnupg-agent dirmngr \
                 git make \
@@ -166,6 +166,9 @@ RUN sed -i 's/env python/&3/' /patroni*.py \
     && if [ "$COMPRESS" = "true" ]; then chmod u+s /usr/bin/sudo; fi \
     && chmod +s /bin/ping \
     && chown -R postgres:postgres "$PGHOME" /run /etc/haproxy
+
+COPY .github/workflows/install_deps.py .
+RUN python3 install_deps.py
 
 USER postgres
 

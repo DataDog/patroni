@@ -10,6 +10,7 @@ import socket
 import time
 
 from collections import defaultdict
+from lockness import SyncClient, Heartbeats, LockStatus, LockNessTimeoutError
 from copy import deepcopy
 from dns.exception import DNSException
 from dns import resolver
@@ -41,6 +42,27 @@ class EtcdError(DCSError):
 
 
 _AddrInfo = Tuple[socket.AddressFamily, socket.SocketKind, int, str, Union[Tuple[str, int], Tuple[str, int, int, int]]]
+
+
+class LockNess:
+    def __init__(self, config: Dict[str, Any]) -> None:
+        connect_string = config.get('connect_string', 'localhost:9111')
+        self.client = SyncClient.connect(connect_string, heartbeats=Heartbeats.auto(20))
+
+    def acquire_lock(self, target: str, owner: str) -> bool:
+        lock_id = self.client.request_lock(targets=[target], owner=owner, domain="postgres")
+        states = self.client.stream_lock_states(lock_id)
+
+        lock_state = None
+        while lock_state is None or lock_state.status != LockStatus.Acquired:
+            try:
+                lock_state = states.recv(timeout_ms=1000)
+            except LockNessTimeoutError:
+                print("Waiting for lock...")
+
+            print(f"Lock state: {lock_state=}")
+            if lock_state.status == LockStatus.Released:
+                raise RuntimeError("Lock was released before acquired")
 
 
 class DnsCachingResolver(Thread):
