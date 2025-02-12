@@ -62,7 +62,18 @@ class Etcd3Exception(etcd.EtcdException):
 
 
 class LockNess:
+    """
+    A class to manage distributed locks using the LockNess service.
+
+    This class provides methods to acquire locks and send heartbeats to maintain them.
+    It uses a SyncClient to connect to the LockNess service.
+    """
     def __init__(self, config: Dict[str, Any]) -> None:
+        """
+        Initialize the LockNess client with the given configuration.
+
+        :param config: A dictionary containing configuration parameters.
+        """
         connect_string = config.get('connect_string', 'host.docker.internal')
         logger.info(f"Connecting to LockNess at {connect_string}")
         self.client = SyncClient.connect(connect_string, port=9111,
@@ -71,6 +82,14 @@ class LockNess:
         self._lock_id = None
 
     def acquire_lock(self, target: str, owner: str, ttl: int) -> bool:
+        """
+        Attempt to acquire a lock for a specified target.
+
+        :param target: The target resource to lock.
+        :param owner: The owner of the lock.
+        :param ttl: Time-to-live for the lock in seconds.
+        :return: True if the lock is acquired, False otherwise.
+        """
         logger.info(f"Acquiring lock for {target} with owner {owner} and ttl {ttl}")
         lock_id = self.client.request_lock(targets=[target], owner=owner,
                                            domain="postgres", ttl=ttl)
@@ -96,6 +115,11 @@ class LockNess:
         return False
 
     def heartbeat(self) -> str | None:
+        """
+        Send a heartbeat to maintain the lock.
+
+        :return: The lock ID if the heartbeat is successful, None otherwise.
+        """
         if self._lock_id is None:
             return None
 
