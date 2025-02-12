@@ -1,13 +1,13 @@
 import logging
-from cobs_client import CobsClient
+import cobs_client
 from typing import Dict, Any, Union
 
-from patroni.dcs import AbstractDCS
+# from patroni.dcs import AbstractDCS
 from patroni.config import Config
 
 logger = logging.getLogger(__name__)
 
-class CobsDCS(AbstractDCS):
+class CobsDCS():
     """
     A class to manage distributed coordination using the Cobs service.
     """
@@ -18,25 +18,7 @@ class CobsDCS(AbstractDCS):
 
         :param config: A dictionary containing configuration parameters.
         """
-        super().__init__(config)
-        self.client = CobsClient(config['host'], config['port'])
-        self._base_path = config.get('base_path', '/')
-        logger.info(f"Connected to Cobs at {config['host']}:{config['port']}")
+        self._ks = cobs_client.sync.open("cobs://host.docker.internal:8080/patroni_config")
 
-    def client_path(self, path: str) -> str:
-        """
-        Construct the full client path.
-
-        :param path: The path to append to the base path.
-        :return: The full client path.
-        """
-        return f"{self._base_path}/{path}"
-
-    def reload_config(self, config: Union['Config', Dict[str, Any]]) -> None:
-        """
-        Reload the configuration.
-
-        :param config: The new configuration to apply.
-        """
-        self.client.reload_config(config)
-        logger.info("Configuration reloaded.")
+    def initialize(self, create_new: bool = True, sysid: str = ""):
+        return self.retry(self._client.put, self.initialize_path, sysid, create_revision='0' if create_new else None)
