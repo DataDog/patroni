@@ -3,6 +3,7 @@ from cobs_client import CobsClient
 from typing import Dict, Any, Union
 
 from patroni.dcs import AbstractDCS
+from patroni.config import Config
 
 logger = logging.getLogger(__name__)
 
