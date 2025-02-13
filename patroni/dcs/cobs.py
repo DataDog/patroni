@@ -28,3 +28,12 @@ class Cobs():
     def cancel_initialization(self, init_path: str):
         logger.info(f"Canceling initialization of Cobs with path {init_path}")
         return self._ks.transact(lambda tx: tx.delete(init_path))
+
+    def set(self, key: str, value: Union[str, bytes]):
+        logger.info(f"Setting key {key} with value {value}")
+        return self._ks.transact(lambda tx: tx.set(key, value))
+
+    def get(self, key: str):
+        logger.info(f"Getting value for key {key}")
+        with self._ks.read() as snapshot:
+            return snapshot.get(key)
