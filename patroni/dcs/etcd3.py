@@ -699,17 +699,7 @@ class Etcd3(AbstractEtcd):
         enable_keepalive(sock, self.ttl, int(self.loop_wait + self._retry.deadline))
 
     def set_ttl(self, ttl: int) -> Optional[bool]:
-        # self.__do_not_watch = super(Etcd3, self).set_ttl(ttl)
-        # if self.__do_not_watch:
-        #     self._lease = None
-        # return None
-        try:
-            self.cobs.set("ttl", bytes(str(ttl), 'utf-8'))
-            self._ttl = ttl
-            return True
-        except Exception as e:
-            logger.exception('set_ttl failed: ' + str(e))
-            return False
+        return self.cobs.set_ttl(ttl)
 
     def _do_refresh_lease(self, force: bool = False, retry: Optional[Retry] = None) -> bool:
         if not force and self._lease and self._last_lease_refresh + self._loop_wait > time.time():
@@ -829,24 +819,7 @@ class Etcd3(AbstractEtcd):
 
     @catch_etcd_errors
     def touch_member(self, data: Dict[str, Any]) -> bool:
-        try:
-            self.refresh_lease()
-        except Etcd3Error:
-            return False
-
-        cluster = self.cluster
-        member = cluster and cluster.get_member(self._name, fallback_to_leader=False)
-
-        if member and member.session == self._lease and deep_compare(data, member.data):
-            return True
-
-        value = json.dumps(data, separators=(',', ':'))
-        try:
-            return bool(self._client.put(self.member_path, value, self._lease))
-        except LeaseNotFound:
-            self._lease = None
-            logger.error('Our lease disappeared from Etcd, can not "touch_member"')
-        return False
+        return self.cobs.touch_member(data)
 
     @catch_etcd_errors
     def take_leader(self) -> bool:
@@ -893,11 +866,11 @@ class Etcd3(AbstractEtcd):
 
     @catch_etcd_errors
     def set_failover_value(self, value: str, version: Optional[str] = None) -> bool:
-        return bool(self._client.put(self.failover_path, value, mod_revision=version))
+        return self.cobs.set_failover_value(value, version)
 
     @catch_etcd_errors
     def set_config_value(self, value: str, version: Optional[str] = None) -> bool:
-        return bool(self._client.put(self.config_path, value, mod_revision=version))
+        return self.cobs.set_config_value(value, version)
 
     @catch_etcd_errors
     def _write_leader_optime(self, last_lsn: str) -> bool:
@@ -937,9 +910,8 @@ class Etcd3(AbstractEtcd):
         return bool(self._lease)
 
     @catch_etcd_errors
-    def initialize(self, create_new: bool = True, sysid: str = ""):
-        self.cobs.initialize(self.initialize_path)
-        return self.retry(self._client.put, self.initialize_path, sysid, create_revision='0' if create_new else None)
+    def initialize(self, create_new: bool = True, sysid: str = "") -> bool:
+        return self.cobs.initialize(create_new, sysid)
 
     @catch_etcd_errors
     def _delete_leader(self, leader: Leader) -> bool:
@@ -950,25 +922,23 @@ class Etcd3(AbstractEtcd):
 
     @catch_etcd_errors
     def cancel_initialization(self) -> bool:
-        self.cobs.cancel_initialization(self.initialize_path)
-        return self.retry(self._client.deleterange, self.initialize_path)
+        return self.cobs.cancel_initialization()
 
     @catch_etcd_errors
     def delete_cluster(self) -> bool:
-        return self.retry(self._client.deleteprefix, self.client_path(''))
+        return self.cobs.delete_cluster()
 
     @catch_etcd_errors
     def set_history_value(self, value: str) -> bool:
-        return bool(self._client.put(self.history_path, value))
+        return self.cobs.set_history_value(value)
 
     @catch_etcd_errors
     def set_sync_state_value(self, value: str, version: Optional[str] = None) -> Union[str, bool]:
-        return self.retry(self._client.put, self.sync_path, value, mod_revision=version)\
-            .get('header', {}).get('revision', False)
+        return self.cobs.set_sync_state_value(value, version)
 
     @catch_etcd_errors
     def delete_sync_state(self, version: Optional[str] = None) -> bool:
-        return self.retry(self._client.deleterange, self.sync_path, mod_revision=version)
+        return self.cobs.delete_sync_state(version)
 
     def watch(self, leader_version: Optional[str], timeout: float) -> bool:
         if self.__do_not_watch:
