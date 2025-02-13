@@ -1,9 +1,9 @@
 import json
 import logging
 import cobs_client
-from typing import Dict, Any, Union
+from typing import Dict, Any, Union, Optional
 
-# from patroni.dcs import AbstractDCS
+from patroni.dcs import AbstractDCS
 from patroni.config import Config
 
 logger = logging.getLogger(__name__)
