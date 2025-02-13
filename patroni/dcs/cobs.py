@@ -108,7 +108,61 @@ class Cobs(AbstractDCS):
         logger.info("Deleting cluster")
         return self._ks.transact(lambda tx: tx.delete(self.client_path('')))
 
-    def _write_failsafe(self, value: str) -> bool:
+    def _cluster_loader(self, path: str) -> Cluster:
+        """Load and build the :class:`Cluster` object from Cobs, which represents a single Patroni or Citus cluster.
+
+        :param path: the path in Cobs where to load Cluster(s) from.
+
+        :returns: :class:`Cluster` instance.
+        """
+        nodes = {node['key'][len(path):]: node
+                 for node in self._ks.read(path)
+                 if node['key'].startswith(path)}
+
+        # get initialize flag
+        initialize = self.get(self.initialize_path)
+        initialize = initialize and initialize.decode('utf-8')
+
+        # get global dynamic configuration
+        config = self.get(self.config_path)
+        config = config and ClusterConfig.from_node(0, config.decode('utf-8'))
+
+        # get timeline history
+        history = self.get(self.history_path)
+        history = history and TimelineHistory.from_node(0, history.decode('utf-8'))
+
+        # get last known leader lsn and slots
+        status = self.get(self.status_path) or self.get(self.leader_optime_path)
+        status = Status.from_node(status and status.decode('utf-8'))
+
+        # get list of members
+        members = [Member.from_node(0, os.path.basename(node['key']), None, node['value'].decode('utf-8'))
+                   for node in nodes.values() if node['key'].startswith(self.members_path) and node['key'].count('/') == 1]
+
+        # get leader
+        leader = self.get(self.leader_path)
+        if leader:
+            member = Member(-1, leader.decode('utf-8'), None, {})
+            member = ([m for m in members if m.name == leader.decode('utf-8')] or [member])[0]
+            leader = Leader(0, None, member)
+
+        # failover key
+        failover = self.get(self.failover_path)
+        if failover:
+            failover = Failover.from_node(0, failover.decode('utf-8'))
+
+        # get synchronization state
+        sync = self.get(self.sync_path)
+        sync = SyncState.from_node(0, sync and sync.decode('utf-8'))
+
+        # get failsafe topology
+        failsafe = self.get(self.failsafe_path)
+        try:
+            failsafe = json.loads(failsafe.decode('utf-8')) if failsafe else None
+        except Exception:
+            failsafe = None
+
+        return Cluster(initialize, config, leader, status, members, failover, sync, history, failsafe)
         """Write current cluster topology to DCS that will be used by failsafe mechanism (if enabled).
 
         :param value: failsafe topology serialized in JSON format.
