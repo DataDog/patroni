@@ -57,9 +57,6 @@ class Cobs(AbstractDCS):
         logger.info(f"Getting value for key {key}")
         with self._ks.read() as snapshot:
             return snapshot.get(key)
-        logger.info(f"Setting TTL to {ttl}")
-        # Implement TTL setting logic here
-        return True
 
     @property
     def ttl(self) -> int:
