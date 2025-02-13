@@ -23,6 +23,19 @@ class Cobs(AbstractDCS):
         logger.info(f"Connecting to Cobs at host.docker.internal:8080")
         self._ks = cobs_client.sync.open("cobs://host.docker.internal:8080/patroni_config?auth=off")
 
+        # Set default paths
+        self.initialize_path = '/service/initialize'
+        self.config_path = '/service/config'
+        self.members_path = '/service/members/'
+        self.member_path = f'/service/members/{self._name}'
+        self.leader_path = '/service/leader'
+        self.failover_path = '/service/failover'
+        self.history_path = '/service/history'
+        self.status_path = '/service/status'
+        self.leader_optime_path = '/service/optime/leader'
+        self.sync_path = '/service/sync'
+        self.failsafe_path = '/service/failsafe'
+
     def set_ttl(self, ttl: int) -> Optional[bool]:
         logger.info(f"Setting TTL to {ttl}")
         # Implement TTL setting logic here
