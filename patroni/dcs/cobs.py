@@ -58,6 +58,11 @@ class Cobs(AbstractDCS):
         with self._ks.read() as snapshot:
             return snapshot.get(key)
 
+    def set_ttl(self, ttl: int) -> None:
+        logger.info(f"Setting TTL to {ttl}")
+        # Implement TTL setting logic here
+        self.set('ttl', str(ttl))
+
     @property
     def ttl(self) -> int:
         # Implement logic to get current TTL
