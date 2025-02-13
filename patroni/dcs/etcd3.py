@@ -10,7 +10,6 @@ import time
 import urllib3
 
 from collections import defaultdict
-from lockness import SyncClient, Heartbeats, LockStatus, LockNessTimeoutError
 from enum import IntEnum
 from urllib3.exceptions import ReadTimeoutError, ProtocolError
 from threading import Condition, Lock, Thread
@@ -18,6 +17,8 @@ from typing import Any, Callable, Collection, Dict, Iterator, List, Optional, Tu
 
 from . import ClusterConfig, Cluster, Failover, Leader, Member, Status, SyncState, \
     TimelineHistory, catch_return_false_exception, citus_group_re
+from .lockness import LockNess
+from .cobs import Cobs
 from .etcd import AbstractEtcdClientWithFailover, AbstractEtcd, catch_etcd_errors, DnsCachingResolver, Retry
 from ..exceptions import DCSError, PatroniException
 from ..utils import deep_compare, enable_keepalive, iter_response_objects, RetryFailedError, USER_AGENT
@@ -60,75 +61,6 @@ GRPCcodeToText: Dict[int, str] = {v: k for k, v in GRPCCode.__dict__['_member_ma
 class Etcd3Exception(etcd.EtcdException):
     pass
 
-
-class LockNess:
-    """
-    A class to manage distributed locks using the LockNess service.
-
-    This class provides methods to acquire locks and send heartbeats to maintain them.
-    It uses a SyncClient to connect to the LockNess service.
-    """
-    def __init__(self, config: Dict[str, Any]) -> None:
-        """
-        Initialize the LockNess client with the given configuration.
-
-        :param config: A dictionary containing configuration parameters.
-        """
-        connect_string = config.get('connect_string', 'host.docker.internal')
-        logger.info(f"Connecting to LockNess at {connect_string}")
-        self.client = SyncClient.connect(connect_string, port=9111,
-                                         heartbeats=Heartbeats.manual(),
-                                         auth_n=False)
-        self._lock_id = None
-
-    def acquire_lock(self, target: str, owner: str, ttl: int) -> bool:
-        """
-        Attempt to acquire a lock for a specified target.
-
-        :param target: The target resource to lock.
-        :param owner: The owner of the lock.
-        :param ttl: Time-to-live for the lock in seconds.
-        :return: True if the lock is acquired, False otherwise.
-        """
-        logger.info(f"Acquiring lock for {target} with owner {owner} and ttl {ttl}")
-        lock_id = self.client.request_lock(targets=[target], owner=owner,
-                                           domain="postgres", ttl=ttl)
-        logger.info(f"LOCK ID: {lock_id}")
-        print(f"LOCK ID: ", lock_id)
-        states = self.client.stream_lock_states(lock_id)
-
-        self._lock_id = lock_id
-
-        lock_state = None
-        while lock_state is None or lock_state.status != LockStatus.Acquired:
-            try:
-                lock_state = states.recv(timeout_ms=1000)
-                if lock_state is not None and lock_state.status == LockStatus.Acquired:
-                    return True
-
-                return False
-            except LockNessTimeoutError:
-                logger.info("Waiting for lock...")
-
-            logger.info(f"Lock state: {lock_state=}")
-
-        return False
-
-    def heartbeat(self) -> str | None:
-        """
-        Send a heartbeat to maintain the lock.
-
-        :return: The lock ID if the heartbeat is successful, None otherwise.
-        """
-        if self._lock_id is None:
-            return None
-
-        try:
-            self.client.send_heartbeat(self._lock_id)
-        except Exception as e:
-            logger.exception(f"Error sending heartbeat: {e}")
-
-        return self._lock_id
 
 class Etcd3ClientError(Etcd3Exception):
 
@@ -746,12 +678,13 @@ class Etcd3(AbstractEtcd):
         self.__do_not_watch = False
         self._lease = None
         self._last_lease_refresh = 0
-        # self.lockness = LockNess(config)
+        self.lockness = LockNess(config, self._ttl)
+        self.cobs = Cobs()
 
         self._client.configure(self)
         if not self._ctl:
             self._client.start_watcher()
-            self.create_lease()
+            # self.create_lease()
 
     @property
     def _client(self) -> PatroniEtcd3Client:
@@ -780,7 +713,7 @@ class Etcd3(AbstractEtcd):
 
         ret = not self._lease
         if ret:
-            # self._lease = self._client.lease_grant(self._ttl, retry=retry)
+            #self._lease = self._client.lease_grant(self._ttl, retry=retry)
             self._lease = self.lockness.heartbeat()
 
         self._last_lease_refresh = time.time()
@@ -919,8 +852,8 @@ class Etcd3(AbstractEtcd):
 
         logger.info("attempt to acquire leader")
         try:
-            return _retry(self._client.put, self.leader_path, self._name, self._lease, create_revision='0')
-            # return _retry(self.lockness.acquire_lock, self.leader_path, self._name, self._ttl)
+            # return _retry(self._client.put, self.leader_path, self._name, self._lease, create_revision='0')
+            return _retry(self.lockness.acquire_lock, self.leader_path, self._name, self._ttl)
         except LeaseNotFound:
             logger.error('Our lease disappeared from Etcd. Will try to get a new one and retry attempt')
             self._lease = None
@@ -930,8 +863,8 @@ class Etcd3(AbstractEtcd):
 
             retry.ensure_deadline(1, Etcd3Error('_do_attempt_to_acquire_leader timeout'))
 
-            return _retry(self._client.put, self.leader_path, self._name, self._lease, create_revision='0')
-            # return _retry(self.lockness.acquire_lock, self.leader_path, self._name, self._ttl)
+            # return _retry(self._client.put, self.leader_path, self._name, self._lease, create_revision='0')
+            return _retry(self.lockness.acquire_lock, self.leader_path, self._name, self._ttl)
 
     @catch_return_false_exception
     def attempt_to_acquire_leader(self) -> bool:
@@ -978,35 +911,38 @@ class Etcd3(AbstractEtcd):
             kwargs['retry'] = retry
             return retry(*args, **kwargs)
 
-        self._run_and_handle_exceptions(self._do_refresh_lease, True, retry=_retry)
+        # self._run_and_handle_exceptions(self._do_refresh_lease, True, retry=_retry)
 
-        if self._lease and leader.session != self._lease:
-            retry.ensure_deadline(1, Etcd3Error('update_leader timeout'))
+        if self._lease and self._lease != leader.session:
+            return bool(self.attempt_to_acquire_leader())
 
-            fields = {'key': base64_encode(self.leader_path), 'value': base64_encode(self._name), 'lease': self._lease}
+            # fields = {'key': base64_encode(self.leader_path), 'value': base64_encode(self._name), 'lease': self._lease}
             # First we try to update lease on existing leader key "hoping" that we still owning it
-            compare1 = {'key': fields['key'], 'target': 'VALUE', 'value': fields['value']}
-            request_put = {'request_put': fields}
+            # compare1 = {'key': fields['key'], 'target': 'VALUE', 'value': fields['value']}
+            # request_put = {'request_put': fields}
             # If the first comparison failed we will try to create the new leader key in a transaction
-            compare2 = {'key': fields['key'], 'target': 'CREATE', 'create_revision': '0'}
-            request_txn = {'request_txn': {'compare': [compare2], 'success': [request_put]}}
-            ret = self._run_and_handle_exceptions(self._client.txn, compare1, request_put, request_txn, retry=_retry)
-            return ret.get('succeeded', False)\
-                or ret.get('responses', [{}])[0].get('response_txn', {}).get('succeeded', False)
+            # compare2 = {'key': fields['key'], 'target': 'CREATE', 'create_revision': '0'}
+            # request_txn = {'request_txn': {'compare': [compare2], 'success': [request_put]}}
+            # ret = self._run_and_handle_exceptions(self._client.txn, compare1, request_put, request_txn, retry=_retry)
+            # return ret.get('succeeded', False)\
+                    #    or ret.get('responses', [{}])[0].get('response_txn', {}).get('succeeded', False)
         return bool(self._lease)
 
     @catch_etcd_errors
     def initialize(self, create_new: bool = True, sysid: str = ""):
+        self.cobs.initialize(self.initialize_path)
         return self.retry(self._client.put, self.initialize_path, sysid, create_revision='0' if create_new else None)
 
     @catch_etcd_errors
     def _delete_leader(self, leader: Leader) -> bool:
-        fields = build_range_request(self.leader_path)
-        compare = {'key': fields['key'], 'target': 'VALUE', 'value': base64_encode(self._name)}
-        return bool(self._client.txn(compare, {'request_delete_range': fields}))
+        return bool(self.lockness.release_lock())
+        # fields = build_range_request(self.leader_path)
+        # compare = {'key': fields['key'], 'target': 'VALUE', 'value': base64_encode(self._name)}
+        # return bool(self._client.txn(compare, {'request_delete_range': fields}))
 
     @catch_etcd_errors
     def cancel_initialization(self) -> bool:
+        self.cobs.cancel_initialization(self.initialize_path)
         return self.retry(self._client.deleterange, self.initialize_path)
 
     @catch_etcd_errors

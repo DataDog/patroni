@@ -63,6 +63,7 @@ services:
         environment:
             <<: *haproxy_env
             PATRONI_NAME: patroni1
+            LOCKNESS_PORT: 9111
 
     patroni2:
         image: ${PATRONI_TEST_IMAGE:-patroni}
@@ -73,6 +74,7 @@ services:
         environment:
             <<: *haproxy_env
             PATRONI_NAME: patroni2
+            LOCKNESS_PORT: 9112
 
     patroni3:
         image: ${PATRONI_TEST_IMAGE:-patroni}
@@ -83,3 +85,4 @@ services:
         environment:
             <<: *haproxy_env
             PATRONI_NAME: patroni3
+            LOCKNESS_PORT: 9113

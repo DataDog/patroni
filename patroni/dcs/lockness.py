@@ -17,7 +17,6 @@ class LockNess:
 
         :param config: A dictionary containing configuration parameters.
         """
-        logger.info("TTL: ", ttl)
         connect_string = config.get('connect_string', 'host.docker.internal')
         logger.info(f"Connecting to LockNess at {connect_string}")
         self.client = SyncClient.connect(connect_string, port=9111,
@@ -82,3 +81,4 @@ class LockNess:
         if self._lock_id is not None:
             self.client.release_lock(self._lock_id)
             self._lock_id = None
+

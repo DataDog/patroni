@@ -16,6 +16,11 @@ ARG LANG
 
 ENV ETCDVERSION=3.3.13 CONFDVERSION=0.16.0
 
+# For LockNess
+ENV OBSERVABILITY=disabled
+
+# For COBS
+
 RUN set -ex \
     && export DEBIAN_FRONTEND=noninteractive \
     && echo 'APT::Install-Recommends "0";\nAPT::Install-Suggests "0";' > /etc/apt/apt.conf.d/01norecommend \
@@ -127,6 +132,11 @@ RUN if [ "$COMPRESS" = "true" ]; then \
         && /bin/busybox sh -c "find $save_dirs -type d -depth -exec rmdir -p {} \; 2> /dev/null"; \
     fi
 
+COPY requirements.txt .
+RUN curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+RUN python3 get-pip.py --force-reinstall --break-system-packages
+RUN pip install -r requirements.txt --break-system-packages
+
 FROM scratch
 COPY --from=builder / /
 
@@ -166,11 +176,6 @@ RUN sed -i 's/env python/&3/' /patroni*.py \
     && if [ "$COMPRESS" = "true" ]; then chmod u+s /usr/bin/sudo; fi \
     && chmod +s /bin/ping \
     && chown -R postgres:postgres "$PGHOME" /run /etc/haproxy
-
-COPY requirements.txt .
-RUN curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-RUN python3 get-pip.py --force-reinstall --break-system-packages
-RUN pip install -r requirements.txt --break-system-packages
 
 USER postgres
 
