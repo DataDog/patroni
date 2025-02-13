@@ -36,7 +36,27 @@ class Cobs(AbstractDCS):
         self.sync_path = '/service/sync'
         self.failsafe_path = '/service/failsafe'
 
-    def set_ttl(self, ttl: int) -> Optional[bool]:
+    def set(self, key: str, value: Union[str, bytes]) -> bool:
+        """Set a value for a given key in Cobs.
+
+        :param key: The key to set the value for.
+        :param value: The value to set, either as a string or bytes.
+
+        :returns: ``True`` if the operation was successful.
+        """
+        logger.info(f"Setting key {key} with value {value}")
+        return self._ks.transact(lambda tx: tx.set(key, value.encode('utf-8') if isinstance(value, str) else value))
+
+    def get(self, key: str) -> Optional[bytes]:
+        """Get the value for a given key from Cobs.
+
+        :param key: The key to retrieve the value for.
+
+        :returns: The value as bytes if the key exists, otherwise ``None``.
+        """
+        logger.info(f"Getting value for key {key}")
+        with self._ks.read() as snapshot:
+            return snapshot.get(key)
         logger.info(f"Setting TTL to {ttl}")
         # Implement TTL setting logic here
         return True
