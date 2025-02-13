@@ -5,18 +5,16 @@ import os
 from typing import Dict, Any, Union, Optional
 from patroni.dcs import Cluster, ClusterConfig, TimelineHistory, Status, Member, Leader, Failover, SyncState
 
-from patroni.dcs import AbstractDCS
 from patroni.config import Config
 
 logger = logging.getLogger(__name__)
 
-class Cobs(AbstractDCS):
+class Cobs():
     """
     A class to manage distributed coordination using the Cobs service.
     """
 
-    def __init__(self, config: Dict[str, Any]) -> None:
-        super().__init__(config)
+    def __init__(self) -> None:
         """
         Initialize the CobsDCS client with the given configuration.
 
@@ -29,7 +27,6 @@ class Cobs(AbstractDCS):
         self.initialize_path = '/service/initialize'
         self.config_path = '/service/config'
         self.members_path = '/service/members/'
-        self.member_path = f'/service/members/{self._name}'
         self.leader_path = '/service/leader'
         self.failover_path = '/service/failover'
         self.history_path = '/service/history'
@@ -74,9 +71,9 @@ class Cobs(AbstractDCS):
         logger.info(f"Setting retry timeout to {retry_timeout}")
         # Implement retry timeout setting logic here
 
-    def touch_member(self, data: Dict[str, Any]) -> bool:
-        logger.info(f"Touching member with data {data}")
-        return self._ks.transact(lambda tx: tx.set(self.member_path, json.dumps(data).encode('utf-8')))
+    def touch_member(self, member_path: str, value: str) -> bool:
+        logger.info(f"Touching member with data {value}")
+        return self._ks.transact(lambda tx: tx.set(self.members_path + member_path, value.encode('utf-8')))
 
     def initialize(self, create_new: bool = True, sysid: str = "") -> bool:
         logger.info(f"Initializing with sysid {sysid}")
@@ -110,7 +107,18 @@ class Cobs(AbstractDCS):
         logger.info("Deleting cluster")
         return self._ks.transact(lambda tx: tx.delete(self.client_path('')))
 
-    def _cluster_loader(self, path: str) -> Cluster:
+    def write_failsafe(self, value: str) -> bool:
+        """Write current cluster topology to DCS that will be used by failsafe mechanism (if enabled).
+
+         :param value: failsafe topology serialized in JSON format.
+
+         :returns: ``True`` if successfully committed to DCS.
+         """
+        logger.info(f"Writing failsafe topology {value}")
+        return self._ks.transact(lambda tx: tx.set(self.failsafe_path, value.encode('utf-8')))
+
+
+    def cluster_loader(self, path: str) -> Cluster:
         """Load and build the :class:`Cluster` object from Cobs, which represents a single Patroni or Citus cluster.
 
         :param path: the path in Cobs where to load Cluster(s) from.
