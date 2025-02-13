@@ -54,10 +54,6 @@ class Cobs(AbstractDCS):
         logger.info(f"Touching member with data {data}")
         return self._ks.transact(lambda tx: tx.set(self.member_path, json.dumps(data).encode('utf-8')))
 
-    def take_leader(self) -> bool:
-        logger.info("Taking leader")
-        return self._ks.transact(lambda tx: tx.set(self.leader_path, self._name.encode('utf-8')))
-
     def initialize(self, create_new: bool = True, sysid: str = "") -> bool:
         logger.info(f"Initializing with sysid {sysid}")
         return self._ks.transact(lambda tx: tx.set(self.initialize_path, sysid.encode('utf-8')))
@@ -89,3 +85,7 @@ class Cobs(AbstractDCS):
     def delete_cluster(self) -> bool:
         logger.info("Deleting cluster")
         return self._ks.transact(lambda tx: tx.delete(self.client_path('')))
+
+    def write_leader_optime(self, leader_optime: str) -> bool:
+        logger.info(f"Writing leader optime {leader_optime}")
+        return self._ks.transact(lambda tx: tx.set(self.leader_optime_path, leader_optime.encode('utf-8')))
