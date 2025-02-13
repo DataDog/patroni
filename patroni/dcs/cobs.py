@@ -1,7 +1,9 @@
 import json
 import logging
 import cobs_client
+import os
 from typing import Dict, Any, Union, Optional
+from patroni.dcs import Cluster, ClusterConfig, TimelineHistory, Status, Member, Leader, Failover, SyncState
 
 from patroni.dcs import AbstractDCS
 from patroni.config import Config
@@ -163,11 +165,3 @@ class Cobs(AbstractDCS):
             failsafe = None
 
         return Cluster(initialize, config, leader, status, members, failover, sync, history, failsafe)
-        """Write current cluster topology to DCS that will be used by failsafe mechanism (if enabled).
-
-        :param value: failsafe topology serialized in JSON format.
-
-        :returns: ``True`` if successfully committed to DCS.
-        """
-        logger.info(f"Writing failsafe topology {value}")
-        return self._ks.transact(lambda tx: tx.set(self.failsafe_path, value.encode('utf-8')))
