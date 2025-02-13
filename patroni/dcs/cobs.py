@@ -44,7 +44,11 @@ class Cobs():
         :returns: ``True`` if the operation was successful.
         """
         logger.info(f"Setting key {key} with value {value}")
-        return self._ks.transact(lambda tx: tx.set(key, value.encode('utf-8') if isinstance(value, str) else value))
+        try:
+            return self._ks.transact(lambda tx: tx.set(key, value.encode('utf-8') if isinstance(value, str) else value))
+        except Exception as e:
+            logger.error(f"Failed to set key {key} with value {value}: {e}")
+            return False
 
     def get(self, key: str) -> Optional[bytes]:
         """Get the value for a given key from Cobs.
@@ -54,8 +58,12 @@ class Cobs():
         :returns: The value as bytes if the key exists, otherwise ``None``.
         """
         logger.info(f"Getting value for key {key}")
-        with self._ks.read() as snapshot:
-            return snapshot.get(key)
+        try:
+            with self._ks.read() as snapshot:
+                return snapshot.get(key)
+        except Exception as e:
+            logger.error(f"Failed to get value for key {key}: {e}")
+            return None
 
     def set_ttl(self, ttl: int) -> None:
         logger.info(f"Setting TTL to {ttl}")
@@ -73,39 +81,75 @@ class Cobs():
 
     def touch_member(self, member_path: str, value: str) -> bool:
         logger.info(f"Touching member with data {value}")
-        return self._ks.transact(lambda tx: tx.set(self.members_path + member_path, value.encode('utf-8')))
+        try:
+            return self._ks.transact(lambda tx: tx.set(self.members_path + member_path, value.encode('utf-8')))
+        except Exception as e:
+            logger.error(f"Failed to touch member with data {value}: {e}")
+            return False
 
     def initialize(self, create_new: bool = True, sysid: str = "") -> bool:
         logger.info(f"Initializing with sysid {sysid}")
-        return self._ks.transact(lambda tx: tx.set(self.initialize_path, sysid.encode('utf-8')))
+        try:
+            return self._ks.transact(lambda tx: tx.set(self.initialize_path, sysid.encode('utf-8')))
+        except Exception as e:
+            logger.error(f"Failed to initialize with sysid {sysid}: {e}")
+            return False
 
     def cancel_initialization(self) -> bool:
         logger.info("Canceling initialization")
-        return self._ks.transact(lambda tx: tx.delete(self.initialize_path))
+        try:
+            return self._ks.transact(lambda tx: tx.delete(self.initialize_path))
+        except Exception as e:
+            logger.error(f"Failed to cancel initialization: {e}")
+            return False
 
     def set_failover_value(self, value: str, version: Optional[Any] = None) -> bool:
         logger.info(f"Setting failover value {value}")
-        return self._ks.transact(lambda tx: tx.set(self.failover_path, value.encode('utf-8')))
+        try:
+            return self._ks.transact(lambda tx: tx.set(self.failover_path, value.encode('utf-8')))
+        except Exception as e:
+            logger.error(f"Failed to set failover value {value}: {e}")
+            return False
 
     def set_config_value(self, value: str, version: Optional[Any] = None) -> bool:
         logger.info(f"Setting config value {value}")
-        return self._ks.transact(lambda tx: tx.set(self.config_path, value.encode('utf-8')))
+        try:
+            return self._ks.transact(lambda tx: tx.set(self.config_path, value.encode('utf-8')))
+        except Exception as e:
+            logger.error(f"Failed to set config value {value}: {e}")
+            return False
 
     def set_sync_state_value(self, value: str, version: Optional[Any] = None) -> Union[Any, bool]:
         logger.info(f"Setting sync state value {value}")
-        return self._ks.transact(lambda tx: tx.set(self.sync_path, value.encode('utf-8')))
+        try:
+            return self._ks.transact(lambda tx: tx.set(self.sync_path, value.encode('utf-8')))
+        except Exception as e:
+            logger.error(f"Failed to set sync state value {value}: {e}")
+            return False
 
     def delete_sync_state(self, version: Optional[Any] = None) -> bool:
         logger.info("Deleting sync state")
-        return self._ks.transact(lambda tx: tx.delete(self.sync_path))
+        try:
+            return self._ks.transact(lambda tx: tx.delete(self.sync_path))
+        except Exception as e:
+            logger.error(f"Failed to delete sync state: {e}")
+            return False
 
     def set_history_value(self, value: str) -> bool:
         logger.info(f"Setting history value {value}")
-        return self._ks.transact(lambda tx: tx.set(self.history_path, value.encode('utf-8')))
+        try:
+            return self._ks.transact(lambda tx: tx.set(self.history_path, value.encode('utf-8')))
+        except Exception as e:
+            logger.error(f"Failed to set history value {value}: {e}")
+            return False
 
     def delete_cluster(self) -> bool:
         logger.info("Deleting cluster")
-        return self._ks.transact(lambda tx: tx.delete(self.client_path('')))
+        try:
+            return self._ks.transact(lambda tx: tx.delete(self.client_path('')))
+        except Exception as e:
+            logger.error(f"Failed to delete cluster: {e}")
+            return False
 
     def write_failsafe(self, value: str) -> bool:
         """Write current cluster topology to DCS that will be used by failsafe mechanism (if enabled).
@@ -115,7 +159,11 @@ class Cobs():
          :returns: ``True`` if successfully committed to DCS.
          """
         logger.info(f"Writing failsafe topology {value}")
-        return self._ks.transact(lambda tx: tx.set(self.failsafe_path, value.encode('utf-8')))
+        try:
+            return self._ks.transact(lambda tx: tx.set(self.failsafe_path, value.encode('utf-8')))
+        except Exception as e:
+            logger.error(f"Failed to write failsafe topology {value}: {e}")
+            return False
 
 
     def cluster_loader(self, path: str) -> Cluster:
