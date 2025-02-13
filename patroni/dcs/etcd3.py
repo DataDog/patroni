@@ -699,10 +699,17 @@ class Etcd3(AbstractEtcd):
         enable_keepalive(sock, self.ttl, int(self.loop_wait + self._retry.deadline))
 
     def set_ttl(self, ttl: int) -> Optional[bool]:
-        self.__do_not_watch = super(Etcd3, self).set_ttl(ttl)
-        if self.__do_not_watch:
-            self._lease = None
-        return None
+        # self.__do_not_watch = super(Etcd3, self).set_ttl(ttl)
+        # if self.__do_not_watch:
+        #     self._lease = None
+        # return None
+        try:
+            self.cobs.set("ttl", bytes(str(ttl), 'utf-8'))
+            self._ttl = ttl
+            return True
+        except Exception as e:
+            logger.exception('set_ttl failed: ' + str(e))
+            return False
 
     def _do_refresh_lease(self, force: bool = False, retry: Optional[Retry] = None) -> bool:
         if not force and self._lease and self._last_lease_refresh + self._loop_wait > time.time():
@@ -843,7 +850,8 @@ class Etcd3(AbstractEtcd):
 
     @catch_etcd_errors
     def take_leader(self) -> bool:
-        return self.retry(self._client.put, self.leader_path, self._name, self._lease)
+        # return self.retry(self._client.put, self.leader_path, self._name, self._lease)
+        return self.lockness.acquire_lock(self.leader_path, self._name, self._ttl)
 
     def _do_attempt_to_acquire_leader(self, retry: Retry) -> bool:
         def _retry(*args: Any, **kwargs: Any) -> Any:
