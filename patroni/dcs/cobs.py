@@ -95,5 +95,3 @@ class Cobs(AbstractDCS):
         """
         logger.info(f"Writing failsafe topology {value}")
         return self._ks.transact(lambda tx: tx.set(self.failsafe_path, value.encode('utf-8')))
-        logger.info(f"Writing leader optime {leader_optime}")
-        return self._ks.transact(lambda tx: tx.set(self.leader_optime_path, leader_optime.encode('utf-8')))
