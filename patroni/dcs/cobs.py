@@ -86,6 +86,14 @@ class Cobs(AbstractDCS):
         logger.info("Deleting cluster")
         return self._ks.transact(lambda tx: tx.delete(self.client_path('')))
 
-    def write_leader_optime(self, leader_optime: str) -> bool:
+    def _write_failsafe(self, value: str) -> bool:
+        """Write current cluster topology to DCS that will be used by failsafe mechanism (if enabled).
+
+        :param value: failsafe topology serialized in JSON format.
+
+        :returns: ``True`` if successfully committed to DCS.
+        """
+        logger.info(f"Writing failsafe topology {value}")
+        return self._ks.transact(lambda tx: tx.set(self.failsafe_path, value.encode('utf-8')))
         logger.info(f"Writing leader optime {leader_optime}")
         return self._ks.transact(lambda tx: tx.set(self.leader_optime_path, leader_optime.encode('utf-8')))
