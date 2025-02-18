@@ -22,6 +22,10 @@ class Cobs():
         """
         logger.info(f"Connecting to Cobs at host.docker.internal:8080")
         self._ks = cobs_client.sync.open("cobs://host.docker.internal:8080/patroni_config?auth=off")
+        try:
+            self._ks.transact(lambda tx: tx.set('ttl', '30'))
+        except Exception as e:
+            logger.error(f"Failed to set TTL: {e}")
 
         # Set default paths
         self.initialize_path = '/service/initialize'
@@ -60,7 +64,7 @@ class Cobs():
         logger.info(f"Getting value for key {key}")
         try:
             with self._ks.read() as snapshot:
-                return snapshot.get(key)
+                return snapshot.get(key).decode('utf-8')
         except Exception as e:
             logger.error(f"Failed to get value for key {key}: {e}")
             return None
@@ -82,7 +86,7 @@ class Cobs():
     def touch_member(self, member_path: str, value: str) -> bool:
         logger.info(f"Touching member with data {value}")
         try:
-            return self._ks.transact(lambda tx: tx.set(self.members_path + member_path, value.encode('utf-8')))
+            return self._ks.transact(lambda tx: tx.set(member_path, value.encode('utf-8')))
         except Exception as e:
             logger.error(f"Failed to touch member with data {value}: {e}")
             return False
@@ -90,7 +94,8 @@ class Cobs():
     def initialize(self, create_new: bool = True, sysid: str = "") -> bool:
         logger.info(f"Initializing with sysid {sysid}")
         try:
-            return self._ks.transact(lambda tx: tx.set(self.initialize_path, sysid.encode('utf-8')))
+            self._ks.transact(lambda tx: tx.set(self.initialize_path, "true".encode('utf-8')))
+            return True
         except Exception as e:
             logger.error(f"Failed to initialize with sysid {sysid}: {e}")
             return False
@@ -98,7 +103,8 @@ class Cobs():
     def cancel_initialization(self) -> bool:
         logger.info("Canceling initialization")
         try:
-            return self._ks.transact(lambda tx: tx.delete(self.initialize_path))
+            self._ks.transact(lambda tx: tx.delete(self.initialize_path))
+            return True
         except Exception as e:
             logger.error(f"Failed to cancel initialization: {e}")
             return False
@@ -106,7 +112,8 @@ class Cobs():
     def set_failover_value(self, value: str, version: Optional[Any] = None) -> bool:
         logger.info(f"Setting failover value {value}")
         try:
-            return self._ks.transact(lambda tx: tx.set(self.failover_path, value.encode('utf-8')))
+            self._ks.transact(lambda tx: tx.set(self.failover_path, value.encode('utf-8')))
+            return True
         except Exception as e:
             logger.error(f"Failed to set failover value {value}: {e}")
             return False
@@ -114,7 +121,8 @@ class Cobs():
     def set_config_value(self, value: str, version: Optional[Any] = None) -> bool:
         logger.info(f"Setting config value {value}")
         try:
-            return self._ks.transact(lambda tx: tx.set(self.config_path, value.encode('utf-8')))
+            self._ks.transact(lambda tx: tx.set(self.config_path, value.encode('utf-8')))
+            return True
         except Exception as e:
             logger.error(f"Failed to set config value {value}: {e}")
             return False
@@ -122,7 +130,8 @@ class Cobs():
     def set_sync_state_value(self, value: str, version: Optional[Any] = None) -> Union[Any, bool]:
         logger.info(f"Setting sync state value {value}")
         try:
-            return self._ks.transact(lambda tx: tx.set(self.sync_path, value.encode('utf-8')))
+            self._ks.transact(lambda tx: tx.set(self.sync_path, value.encode('utf-8')))
+            return value
         except Exception as e:
             logger.error(f"Failed to set sync state value {value}: {e}")
             return False
@@ -130,7 +139,8 @@ class Cobs():
     def delete_sync_state(self, version: Optional[Any] = None) -> bool:
         logger.info("Deleting sync state")
         try:
-            return self._ks.transact(lambda tx: tx.delete(self.sync_path))
+            self._ks.transact(lambda tx: tx.delete(self.sync_path))
+            return True
         except Exception as e:
             logger.error(f"Failed to delete sync state: {e}")
             return False
@@ -138,7 +148,8 @@ class Cobs():
     def set_history_value(self, value: str) -> bool:
         logger.info(f"Setting history value {value}")
         try:
-            return self._ks.transact(lambda tx: tx.set(self.history_path, value.encode('utf-8')))
+            self._ks.transact(lambda tx: tx.set(self.history_path, value.encode('utf-8')))
+            return True
         except Exception as e:
             logger.error(f"Failed to set history value {value}: {e}")
             return False
@@ -146,7 +157,8 @@ class Cobs():
     def delete_cluster(self) -> bool:
         logger.info("Deleting cluster")
         try:
-            return self._ks.transact(lambda tx: tx.delete(self.client_path('')))
+            self._ks.transact(lambda tx: tx.delete(self.client_path('')))
+            return True
         except Exception as e:
             logger.error(f"Failed to delete cluster: {e}")
             return False
@@ -160,10 +172,28 @@ class Cobs():
          """
         logger.info(f"Writing failsafe topology {value}")
         try:
-            return self._ks.transact(lambda tx: tx.set(self.failsafe_path, value.encode('utf-8')))
+            self._ks.transact(lambda tx: tx.set(self.failsafe_path, value.encode('utf-8')))
+            return True
         except Exception as e:
             logger.error(f"Failed to write failsafe topology {value}: {e}")
             return False
+
+
+    def get_members(self) -> Dict[str, str]:
+        logger.info("Getting members")
+
+        # TODO: cobs_client does not support range reads right now so we have to
+        # hardcode the possible member names here
+        member_names = ["patroni1", "patroni2", "patroni3"]
+        node_data = {}
+        try:
+            for member in member_names:
+                node_data[member] = self.get(self.members_path + member)
+
+            return node_data
+        except Exception as e:
+            logger.error(f"Failed to get members: {e}")
+            return {}
 
 
     def cluster_loader(self, path: str) -> Cluster:
@@ -173,51 +203,57 @@ class Cobs():
 
         :returns: :class:`Cluster` instance.
         """
-        nodes = {node['key'][len(path):]: node
-                 for node in self._ks.read(path)
-                 if node['key'].startswith(path)}
-
-        # get initialize flag
-        initialize = self.get(self.initialize_path)
-        initialize = initialize and initialize.decode('utf-8')
-
-        # get global dynamic configuration
-        config = self.get(self.config_path)
-        config = config and ClusterConfig.from_node(0, config.decode('utf-8'))
-
-        # get timeline history
-        history = self.get(self.history_path)
-        history = history and TimelineHistory.from_node(0, history.decode('utf-8'))
-
-        # get last known leader lsn and slots
-        status = self.get(self.status_path) or self.get(self.leader_optime_path)
-        status = Status.from_node(status and status.decode('utf-8'))
-
-        # get list of members
-        members = [Member.from_node(0, os.path.basename(node['key']), None, node['value'].decode('utf-8'))
-                   for node in nodes.values() if node['key'].startswith(self.members_path) and node['key'].count('/') == 1]
-
-        # get leader
-        leader = self.get(self.leader_path)
-        if leader:
-            member = Member(-1, leader.decode('utf-8'), None, {})
-            member = ([m for m in members if m.name == leader.decode('utf-8')] or [member])[0]
-            leader = Leader(0, None, member)
-
-        # failover key
-        failover = self.get(self.failover_path)
-        if failover:
-            failover = Failover.from_node(0, failover.decode('utf-8'))
-
-        # get synchronization state
-        sync = self.get(self.sync_path)
-        sync = SyncState.from_node(0, sync and sync.decode('utf-8'))
-
-        # get failsafe topology
-        failsafe = self.get(self.failsafe_path)
         try:
-            failsafe = json.loads(failsafe.decode('utf-8')) if failsafe else None
-        except Exception:
-            failsafe = None
+            nodes = self.get_members()
 
-        return Cluster(initialize, config, leader, status, members, failover, sync, history, failsafe)
+            logger.info(f"NODES: {nodes}")
+
+            # get initialize flag
+            initialize = self.get(self.initialize_path)
+            initialize = initialize and initialize.decode('utf-8')
+
+            # get global dynamic configuration
+            config = self.get(self.config_path)
+            config = config and ClusterConfig.from_node(0, config.decode('utf-8'))
+
+            # get timeline history
+            history = self.get(self.history_path)
+            history = history and TimelineHistory.from_node(0, history.decode('utf-8'))
+
+            # get last known leader lsn and slots
+            status = self.get(self.status_path) or self.get(self.leader_optime_path)
+            status = Status.from_node(status and status.decode('utf-8'))
+
+            # get list of members
+            if nodes and nodes != {}:
+                members = [Member.from_node(0, name, data.decode('utf-8')) for name, data in nodes.items()]
+
+                # get leader
+                leader = self.get(self.leader_path)
+                if leader:
+                    member = Member(-1, leader.decode('utf-8'), None, {})
+                    member = ([m for m in members if m.name == leader.decode('utf-8')] or [member])[0]
+                    leader = Leader(0, None, member)
+
+                # failover key
+                failover = self.get(self.failover_path)
+                if failover:
+                    failover = Failover.from_node(0, failover.decode('utf-8'))
+
+                # get synchronization state
+                sync = self.get(self.sync_path)
+                sync = SyncState.from_node(0, sync and sync.decode('utf-8'))
+
+                # get failsafe topology
+                failsafe = self.get(self.failsafe_path)
+                try:
+                    failsafe = json.loads(failsafe.decode('utf-8')) if failsafe else None
+                except Exception:
+                    failsafe = None
+
+                return Cluster(initialize, config, leader, status, members, failover, sync, history, failsafe)
+            else:
+                return Cluster.empty()
+        except Exception as e:
+            logger.error(f"Failed to load cluster from path {path}: {e}")
+            return Cluster.empty()

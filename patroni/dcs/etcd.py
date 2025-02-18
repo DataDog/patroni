@@ -541,6 +541,7 @@ class AbstractEtcd(AbstractDCS):
 
     def _run_and_handle_exceptions(self, method: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         retry = kwargs.pop('retry', self.retry)
+        print("retry fn: ", retry)
         try:
             return retry(method, *args, **kwargs) if retry else method(*args, **kwargs)
         except (RetryFailedError, etcd.EtcdConnectionFailed) as e:

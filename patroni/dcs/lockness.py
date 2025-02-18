@@ -35,7 +35,7 @@ class LockNess:
         """
         logger.info(f"Acquiring lock for {target} with owner {owner} and ttl {ttl}")
         lock_id = self.client.request_lock(targets=[target], owner=owner,
-                                           domain="postgres", ttl=ttl)
+                                           domain="postgres", ttl_seconds=ttl)
         logger.info(f"LOCK ID: {lock_id}")
         states = self.client.stream_lock_states(lock_id)
 
@@ -79,6 +79,9 @@ class LockNess:
         Release the lock.
         """
         if self._lock_id is not None:
-            self.client.release_lock(self._lock_id)
-            self._lock_id = None
+            try:
+                self.client.release_lock(self._lock_id)
+                self._lock_id = None
+            except Exception as e:
+                logger.exception(f"Error releasing lock: {e}")
 

@@ -788,10 +788,14 @@ class Etcd3(AbstractEtcd):
         return Cluster(initialize, config, leader, status, members, failover, sync, history, failsafe)
 
     def _cluster_loader(self, path: str) -> Cluster:
-        nodes = {node['key'][len(path):]: node
-                 for node in self._client.get_cluster(path)
-                 if node['key'].startswith(path)}
-        return self._cluster_from_nodes(nodes)
+        retry = self._retry.copy()
+        # nodes = {node['key'][len(path):]: node
+        #         for node in self._client.get_cluster(path)
+        #         if node['key'].startswith(path)}
+        # return self._cluster_from_nodes(nodes)
+        def _retry(*args: Any, **kwargs: Any) -> Any:
+            return retry(*args, **kwargs)
+        return self._run_and_handle_exceptions(self.cobs.cluster_loader, path, retry=_retry)
 
     def _citus_cluster_loader(self, path: str) -> Dict[int, Cluster]:
         clusters: Dict[int, Dict[str, Dict[str, Any]]] = defaultdict(dict)
@@ -819,7 +823,16 @@ class Etcd3(AbstractEtcd):
 
     @catch_etcd_errors
     def touch_member(self, data: Dict[str, Any]) -> bool:
-        return self.cobs.touch_member(data)
+        cluster = self.cluster
+        member = cluster and cluster.get_member(self._name, fallback_to_leader=False)
+
+        logger.info("Touching member %s", self._name)
+
+        if member and member.session == self._lease and deep_compare(data, member.data):
+            return True
+
+        value = json.dumps(data, separators=(',', ':'))
+        return self.cobs.touch_member(self.member_path, value)
 
     @catch_etcd_errors
     def take_leader(self) -> bool:
@@ -834,7 +847,7 @@ class Etcd3(AbstractEtcd):
         logger.info("attempt to acquire leader")
         try:
             # return _retry(self._client.put, self.leader_path, self._name, self._lease, create_revision='0')
-            return _retry(self.lockness.acquire_lock, self.leader_path, self._name, self._ttl)
+            return self.lockness.acquire_lock(self.leader_path, self._name, self._ttl)
         except LeaseNotFound:
             logger.error('Our lease disappeared from Etcd. Will try to get a new one and retry attempt')
             self._lease = None
@@ -845,7 +858,7 @@ class Etcd3(AbstractEtcd):
             retry.ensure_deadline(1, Etcd3Error('_do_attempt_to_acquire_leader timeout'))
 
             # return _retry(self._client.put, self.leader_path, self._name, self._lease, create_revision='0')
-            return _retry(self.lockness.acquire_lock, self.leader_path, self._name, self._ttl)
+            return self.lockness.acquire_lock(self.leader_path, self._name, self._ttl)
 
     @catch_return_false_exception
     def attempt_to_acquire_leader(self) -> bool:
