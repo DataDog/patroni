@@ -7,7 +7,7 @@ ARG PGDATA=$PGHOME/data
 ARG LC_ALL=C.UTF-8
 ARG LANG=C.UTF-8
 
-FROM postgres:$PG_MAJOR as builder
+FROM registry.ddbuild.io/images/mirror/postgres:$PG_MAJOR as builder
 
 ARG PGHOME
 ARG PGDATA
@@ -15,6 +15,11 @@ ARG LC_ALL
 ARG LANG
 
 ENV ETCDVERSION=3.3.13 CONFDVERSION=0.16.0
+
+# For LockNess
+ENV OBSERVABILITY=disabled
+
+# For COBS
 
 RUN set -ex \
     && export DEBIAN_FRONTEND=noninteractive \
@@ -68,8 +73,8 @@ RUN set -ex \
     fi \
 \
     # Clean up all useless packages and some files
-    && apt-get purge -y --allow-remove-essential python3-pip gzip bzip2 util-linux e2fsprogs \
-                libmagic1 bsdmainutils login ncurses-bin libmagic-mgc e2fslibs bsdutils \
+    && apt-get purge -y --allow-remove-essential gzip bzip2 util-linux e2fsprogs \
+                libmagic1 bsdmainutils login ncurses-bin libmagic-mgc python3-pip e2fslibs bsdutils \
                 exim4-config gnupg-agent dirmngr \
                 git make \
     && apt-get autoremove -y \
@@ -126,6 +131,11 @@ RUN if [ "$COMPRESS" = "true" ]; then \
         && /bin/busybox --install -s \
         && /bin/busybox sh -c "find $save_dirs -type d -depth -exec rmdir -p {} \; 2> /dev/null"; \
     fi
+
+COPY requirements.txt .
+RUN curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+RUN python3 get-pip.py --force-reinstall --break-system-packages
+RUN pip install -r requirements.txt --break-system-packages
 
 FROM scratch
 COPY --from=builder / /

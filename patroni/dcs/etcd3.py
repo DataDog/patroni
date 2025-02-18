@@ -17,6 +17,8 @@ from typing import Any, Callable, Collection, Dict, Iterator, List, Optional, Tu
 
 from . import ClusterConfig, Cluster, Failover, Leader, Member, Status, SyncState, \
     TimelineHistory, catch_return_false_exception, citus_group_re
+from .lockness import LockNess
+from .cobs import Cobs
 from .etcd import AbstractEtcdClientWithFailover, AbstractEtcd, catch_etcd_errors, DnsCachingResolver, Retry
 from ..exceptions import DCSError, PatroniException
 from ..utils import deep_compare, enable_keepalive, iter_response_objects, RetryFailedError, USER_AGENT
@@ -676,11 +678,13 @@ class Etcd3(AbstractEtcd):
         self.__do_not_watch = False
         self._lease = None
         self._last_lease_refresh = 0
+        self.lockness = LockNess(config, self._ttl)
+        self.cobs = Cobs()
 
         self._client.configure(self)
         if not self._ctl:
             self._client.start_watcher()
-            self.create_lease()
+            # self.create_lease()
 
     @property
     def _client(self) -> PatroniEtcd3Client:
@@ -695,10 +699,7 @@ class Etcd3(AbstractEtcd):
         enable_keepalive(sock, self.ttl, int(self.loop_wait + self._retry.deadline))
 
     def set_ttl(self, ttl: int) -> Optional[bool]:
-        self.__do_not_watch = super(Etcd3, self).set_ttl(ttl)
-        if self.__do_not_watch:
-            self._lease = None
-        return None
+        return self.cobs.set_ttl(ttl)
 
     def _do_refresh_lease(self, force: bool = False, retry: Optional[Retry] = None) -> bool:
         if not force and self._lease and self._last_lease_refresh + self._loop_wait > time.time():
@@ -709,7 +710,8 @@ class Etcd3(AbstractEtcd):
 
         ret = not self._lease
         if ret:
-            self._lease = self._client.lease_grant(self._ttl, retry=retry)
+            #self._lease = self._client.lease_grant(self._ttl, retry=retry)
+            self._lease = self.lockness.heartbeat()
 
         self._last_lease_refresh = time.time()
         return ret
@@ -786,10 +788,14 @@ class Etcd3(AbstractEtcd):
         return Cluster(initialize, config, leader, status, members, failover, sync, history, failsafe)
 
     def _cluster_loader(self, path: str) -> Cluster:
-        nodes = {node['key'][len(path):]: node
-                 for node in self._client.get_cluster(path)
-                 if node['key'].startswith(path)}
-        return self._cluster_from_nodes(nodes)
+        retry = self._retry.copy()
+        # nodes = {node['key'][len(path):]: node
+        #         for node in self._client.get_cluster(path)
+        #         if node['key'].startswith(path)}
+        # return self._cluster_from_nodes(nodes)
+        def _retry(*args: Any, **kwargs: Any) -> Any:
+            return retry(*args, **kwargs)
+        return self._run_and_handle_exceptions(self.cobs.cluster_loader, path, retry=_retry)
 
     def _citus_cluster_loader(self, path: str) -> Dict[int, Cluster]:
         clusters: Dict[int, Dict[str, Dict[str, Any]]] = defaultdict(dict)
@@ -817,36 +823,31 @@ class Etcd3(AbstractEtcd):
 
     @catch_etcd_errors
     def touch_member(self, data: Dict[str, Any]) -> bool:
-        try:
-            self.refresh_lease()
-        except Etcd3Error:
-            return False
-
         cluster = self.cluster
         member = cluster and cluster.get_member(self._name, fallback_to_leader=False)
+
+        logger.info("Touching member %s", self._name)
 
         if member and member.session == self._lease and deep_compare(data, member.data):
             return True
 
         value = json.dumps(data, separators=(',', ':'))
-        try:
-            return bool(self._client.put(self.member_path, value, self._lease))
-        except LeaseNotFound:
-            self._lease = None
-            logger.error('Our lease disappeared from Etcd, can not "touch_member"')
-        return False
+        return self.cobs.touch_member(self.member_path, value)
 
     @catch_etcd_errors
     def take_leader(self) -> bool:
-        return self.retry(self._client.put, self.leader_path, self._name, self._lease)
+        # return self.retry(self._client.put, self.leader_path, self._name, self._lease)
+        return self.lockness.acquire_lock(self.leader_path, self._name, self._ttl)
 
     def _do_attempt_to_acquire_leader(self, retry: Retry) -> bool:
         def _retry(*args: Any, **kwargs: Any) -> Any:
             kwargs['retry'] = retry
             return retry(*args, **kwargs)
 
+        logger.info("attempt to acquire leader")
         try:
-            return _retry(self._client.put, self.leader_path, self._name, self._lease, create_revision='0')
+            # return _retry(self._client.put, self.leader_path, self._name, self._lease, create_revision='0')
+            return self.lockness.acquire_lock(self.leader_path, self._name, self._ttl)
         except LeaseNotFound:
             logger.error('Our lease disappeared from Etcd. Will try to get a new one and retry attempt')
             self._lease = None
@@ -856,7 +857,8 @@ class Etcd3(AbstractEtcd):
 
             retry.ensure_deadline(1, Etcd3Error('_do_attempt_to_acquire_leader timeout'))
 
-            return _retry(self._client.put, self.leader_path, self._name, self._lease, create_revision='0')
+            # return _retry(self._client.put, self.leader_path, self._name, self._lease, create_revision='0')
+            return self.lockness.acquire_lock(self.leader_path, self._name, self._ttl)
 
     @catch_return_false_exception
     def attempt_to_acquire_leader(self) -> bool:
@@ -877,11 +879,11 @@ class Etcd3(AbstractEtcd):
 
     @catch_etcd_errors
     def set_failover_value(self, value: str, version: Optional[str] = None) -> bool:
-        return bool(self._client.put(self.failover_path, value, mod_revision=version))
+        return self.cobs.set_failover_value(value, version)
 
     @catch_etcd_errors
     def set_config_value(self, value: str, version: Optional[str] = None) -> bool:
-        return bool(self._client.put(self.config_path, value, mod_revision=version))
+        return self.cobs.set_config_value(value, version)
 
     @catch_etcd_errors
     def _write_leader_optime(self, last_lsn: str) -> bool:
@@ -903,53 +905,53 @@ class Etcd3(AbstractEtcd):
             kwargs['retry'] = retry
             return retry(*args, **kwargs)
 
-        self._run_and_handle_exceptions(self._do_refresh_lease, True, retry=_retry)
+        # self._run_and_handle_exceptions(self._do_refresh_lease, True, retry=_retry)
 
-        if self._lease and leader.session != self._lease:
-            retry.ensure_deadline(1, Etcd3Error('update_leader timeout'))
+        if self._lease and self._lease != leader.session:
+            return bool(self.attempt_to_acquire_leader())
 
-            fields = {'key': base64_encode(self.leader_path), 'value': base64_encode(self._name), 'lease': self._lease}
+            # fields = {'key': base64_encode(self.leader_path), 'value': base64_encode(self._name), 'lease': self._lease}
             # First we try to update lease on existing leader key "hoping" that we still owning it
-            compare1 = {'key': fields['key'], 'target': 'VALUE', 'value': fields['value']}
-            request_put = {'request_put': fields}
+            # compare1 = {'key': fields['key'], 'target': 'VALUE', 'value': fields['value']}
+            # request_put = {'request_put': fields}
             # If the first comparison failed we will try to create the new leader key in a transaction
-            compare2 = {'key': fields['key'], 'target': 'CREATE', 'create_revision': '0'}
-            request_txn = {'request_txn': {'compare': [compare2], 'success': [request_put]}}
-            ret = self._run_and_handle_exceptions(self._client.txn, compare1, request_put, request_txn, retry=_retry)
-            return ret.get('succeeded', False)\
-                or ret.get('responses', [{}])[0].get('response_txn', {}).get('succeeded', False)
+            # compare2 = {'key': fields['key'], 'target': 'CREATE', 'create_revision': '0'}
+            # request_txn = {'request_txn': {'compare': [compare2], 'success': [request_put]}}
+            # ret = self._run_and_handle_exceptions(self._client.txn, compare1, request_put, request_txn, retry=_retry)
+            # return ret.get('succeeded', False)\
+                    #    or ret.get('responses', [{}])[0].get('response_txn', {}).get('succeeded', False)
         return bool(self._lease)
 
     @catch_etcd_errors
-    def initialize(self, create_new: bool = True, sysid: str = ""):
-        return self.retry(self._client.put, self.initialize_path, sysid, create_revision='0' if create_new else None)
+    def initialize(self, create_new: bool = True, sysid: str = "") -> bool:
+        return self.cobs.initialize(create_new, sysid)
 
     @catch_etcd_errors
     def _delete_leader(self, leader: Leader) -> bool:
-        fields = build_range_request(self.leader_path)
-        compare = {'key': fields['key'], 'target': 'VALUE', 'value': base64_encode(self._name)}
-        return bool(self._client.txn(compare, {'request_delete_range': fields}))
+        return bool(self.lockness.release_lock())
+        # fields = build_range_request(self.leader_path)
+        # compare = {'key': fields['key'], 'target': 'VALUE', 'value': base64_encode(self._name)}
+        # return bool(self._client.txn(compare, {'request_delete_range': fields}))
 
     @catch_etcd_errors
     def cancel_initialization(self) -> bool:
-        return self.retry(self._client.deleterange, self.initialize_path)
+        return self.cobs.cancel_initialization()
 
     @catch_etcd_errors
     def delete_cluster(self) -> bool:
-        return self.retry(self._client.deleteprefix, self.client_path(''))
+        return self.cobs.delete_cluster()
 
     @catch_etcd_errors
     def set_history_value(self, value: str) -> bool:
-        return bool(self._client.put(self.history_path, value))
+        return self.cobs.set_history_value(value)
 
     @catch_etcd_errors
     def set_sync_state_value(self, value: str, version: Optional[str] = None) -> Union[str, bool]:
-        return self.retry(self._client.put, self.sync_path, value, mod_revision=version)\
-            .get('header', {}).get('revision', False)
+        return self.cobs.set_sync_state_value(value, version)
 
     @catch_etcd_errors
     def delete_sync_state(self, version: Optional[str] = None) -> bool:
-        return self.retry(self._client.deleterange, self.sync_path, mod_revision=version)
+        return self.cobs.delete_sync_state(version)
 
     def watch(self, leader_version: Optional[str], timeout: float) -> bool:
         if self.__do_not_watch:
